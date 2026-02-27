@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+artifacts/
+cache/
+.next/
+typechain-types/
+
+# Foundry
+packages/contracts/out/
+packages/contracts/cache/
+broadcast/
+
+# Circuits
+packages/circuits/build/
+packages/circuits/ptau/
+*.zkey
+*.wtns
+*.r1cs
+*.sym
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Turbo
+.turbo/
+
+# Logs
+*.log
