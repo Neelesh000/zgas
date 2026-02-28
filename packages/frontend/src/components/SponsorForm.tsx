@@ -3,17 +3,35 @@
 import { useState, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { type Address, encodeFunctionData, parseEther } from "viem";
-import { usePrivacyPool, parseNote } from "@/hooks/usePrivacyPool";
-import { CONTRACTS, ACTIVE_CHAIN_ID } from "@/lib/constants";
+import { type Address, encodePacked, keccak256 } from "viem";
+import {
+  usePrivacyPool,
+  parseNote,
+  computeCommitment,
+  computeNullifierHash,
+} from "@/hooks/usePrivacyPool";
+import { usePaymaster } from "@/hooks/usePaymaster";
+import { CONTRACTS, ACTIVE_CHAIN_ID, DENOMINATIONS } from "@/lib/constants";
 import ProofProgress from "./ProofProgress";
 
 type SponsorStep = "connect" | "input" | "proving" | "submit" | "done";
 
 export default function SponsorForm() {
   const { isConnected, address } = useAccount();
-  const { getASPRoot, isWritePending, isTxConfirming, txHash, writeError } =
-    usePrivacyPool();
+  const {
+    getASPRoot,
+    getPoolRoot,
+    checkCommitmentOnChain,
+  } = usePrivacyPool();
+  const {
+    getAccountAddress,
+    isAccountDeployed,
+    buildPaymasterAndData,
+    buildUserOp,
+    buildInitCode,
+    submitSponsoredTx,
+    computeMembershipNullifierHash,
+  } = usePaymaster();
 
   const [noteString, setNoteString] = useState("");
   const [targetAddress, setTargetAddress] = useState("");
@@ -25,6 +43,14 @@ export default function SponsorForm() {
   const [proofError, setProofError] = useState<string | null>(null);
   const [isProofComplete, setIsProofComplete] = useState(false);
   const [userOpHash, setUserOpHash] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Cached proof data from the proving step
+  const [paymasterAndData, setPaymasterAndData] = useState<`0x${string}` | null>(null);
+  const [accountAddress, setAccountAddress] = useState<Address | null>(null);
+  const [initCode, setInitCode] = useState<`0x${string}` | null>(null);
 
   const parsedNote = noteString ? parseNote(noteString.trim()) : null;
   const isNoteValid = parsedNote !== null;
@@ -39,25 +65,58 @@ export default function SponsorForm() {
     setProofStep(0);
 
     try {
-      // Step 0: Prepare inputs (commitment + Merkle path)
-      await new Promise((r) => setTimeout(r, 600));
+      // Step 0: Parse note, derive commitment + nullifier
+      const secret = BigInt(parsedNote.secret);
+      const nullifier = BigInt(parsedNote.nullifier);
+      const commitment = computeCommitment(secret, nullifier) as `0x${string}`;
+
+      // Determine which pool from the note
+      const denom = DENOMINATIONS.find(
+        (d) =>
+          d.token === parsedNote.token &&
+          d.displayAmount.replace(/,/g, "") === parsedNote.amount
+      );
+      if (!denom) throw new Error("Unknown denomination in note");
+
       setProofStep(1);
 
-      // Step 1: Load membership circuit
-      await new Promise((r) => setTimeout(r, 1000));
+      // Step 1: Validate commitment exists on-chain
+      const exists = await checkCommitmentOnChain(commitment, denom.poolKey);
+      if (!exists) throw new Error("Commitment not found on-chain. Did you deposit?");
+
       setProofStep(2);
 
-      // Step 2: Compute witness
-      await new Promise((r) => setTimeout(r, 1500));
+      // Step 2: Fetch pool Merkle root + ASP root
+      const [merkleRoot, aspRoot] = await Promise.all([
+        getPoolRoot(denom.poolKey),
+        getASPRoot(),
+      ]);
+      if (!merkleRoot) throw new Error("Failed to fetch pool Merkle root");
+      if (!aspRoot) throw new Error("Failed to fetch ASP root");
+
       setProofStep(3);
 
-      // Step 3: Generate membership proof
-      // In production: snarkjs.groth16.fullProve with membership circuit
-      await new Promise((r) => setTimeout(r, 2500));
-      setProofStep(4);
+      // Step 3: Compute domain-separated nullifierHash (domain=2 for membership)
+      const nullifierHash = computeMembershipNullifierHash(
+        computeNullifierHash(nullifier) as `0x${string}`
+      );
 
-      // Step 4: Verify locally
-      await new Promise((r) => setTimeout(r, 400));
+      // Build paymasterAndData with dummy proof (MockVerifier accepts anything)
+      const pmData = buildPaymasterAndData(merkleRoot, nullifierHash, aspRoot);
+      setPaymasterAndData(pmData);
+
+      // Step 4: Compute SimpleAccount address and check deployment
+      const acctAddr = await getAccountAddress(address);
+      setAccountAddress(acctAddr);
+
+      const deployed = await isAccountDeployed(acctAddr);
+      if (!deployed) {
+        setInitCode(buildInitCode(address));
+      } else {
+        setInitCode(null);
+      }
+
+      setProofStep(4);
 
       setIsProofComplete(true);
       setStep("submit");
@@ -66,48 +125,62 @@ export default function SponsorForm() {
         err instanceof Error ? err.message : "Unknown error during proving";
       setProofError(message);
     }
-  }, [parsedNote, isTargetValid, address]);
+  }, [
+    parsedNote,
+    isTargetValid,
+    address,
+    checkCommitmentOnChain,
+    getPoolRoot,
+    getASPRoot,
+    computeMembershipNullifierHash,
+    buildPaymasterAndData,
+    getAccountAddress,
+    isAccountDeployed,
+    buildInitCode,
+  ]);
 
   const handleSubmitSponsoredTx = useCallback(async () => {
-    if (!address) return;
+    if (!address || !accountAddress || !paymasterAndData) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
-      // In production, this would:
-      // 1. Construct a PackedUserOperation with the membership proof in paymasterAndData
-      // 2. Submit it to a bundler (e.g. Pimlico, Stackup)
-      // 3. The PrivacyPaymaster validates the proof and sponsors gas
+      const target = targetAddress as Address;
+      const innerCallData = (callData || "0x") as `0x${string}`;
 
-      const contracts = CONTRACTS[ACTIVE_CHAIN_ID];
-
-      // Simulate UserOp construction
-      const simulatedUserOp = {
-        sender: address,
-        nonce: "0x0",
-        initCode: "0x",
-        callData: (callData || "0x") as `0x${string}`,
-        callGasLimit: "0x50000",
-        verificationGasLimit: "0x50000",
-        preVerificationGas: "0x10000",
-        maxFeePerGas: "0x3B9ACA00",
-        maxPriorityFeePerGas: "0x3B9ACA00",
-        paymasterAndData: contracts.privacyPaymaster, // Would include proof bytes
-        signature: "0x",
-      };
-
-      // Simulate bundler submission
-      await new Promise((r) => setTimeout(r, 2000));
-
-      setUserOpHash(
-        "0x" +
-          Array.from(crypto.getRandomValues(new Uint8Array(32)))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("")
+      // Build UserOp
+      const userOp = await buildUserOp(
+        accountAddress,
+        target,
+        innerCallData,
+        paymasterAndData,
+        initCode || undefined
       );
+
+      // Submit to relayer's mini-bundler
+      const result = await submitSponsoredTx(userOp);
+
+      setUserOpHash(result.userOpHash);
+      setTxHash(result.txHash);
       setStep("done");
     } catch (err) {
-      console.error("Sponsored tx failed:", err);
+      const message =
+        err instanceof Error ? err.message : "Transaction failed";
+      setSubmitError(message);
+    } finally {
+      setIsSubmitting(false);
     }
-  }, [address, callData]);
+  }, [
+    address,
+    accountAddress,
+    paymasterAndData,
+    targetAddress,
+    callData,
+    initCode,
+    buildUserOp,
+    submitSponsoredTx,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -288,9 +361,9 @@ export default function SponsorForm() {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between rounded-lg bg-surface-200 p-4">
-              <span className="text-sm text-slate-400">Sender</span>
+              <span className="text-sm text-slate-400">Smart Account</span>
               <span className="font-mono text-xs text-slate-300">
-                {address?.slice(0, 10)}...{address?.slice(-8)}
+                {accountAddress?.slice(0, 10)}...{accountAddress?.slice(-8)}
               </span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-surface-200 p-4">
@@ -303,25 +376,31 @@ export default function SponsorForm() {
               <span className="text-sm text-slate-400">Gas Payment</span>
               <span className="badge-green">Sponsored by Paymaster</span>
             </div>
+            {initCode && (
+              <div className="flex items-center justify-between rounded-lg bg-surface-200 p-4">
+                <span className="text-sm text-slate-400">Account</span>
+                <span className="text-xs text-yellow-400">
+                  Will be deployed with this tx
+                </span>
+              </div>
+            )}
           </div>
 
-          {writeError && (
+          {submitError && (
             <div className="rounded-lg border border-red-800/50 bg-red-900/20 p-3">
               <p className="text-sm text-red-400">
-                {writeError.message?.slice(0, 200)}
+                {submitError.slice(0, 200)}
               </p>
             </div>
           )}
 
           <button
             onClick={handleSubmitSponsoredTx}
-            disabled={isWritePending || isTxConfirming}
+            disabled={isSubmitting}
             className="btn-primary w-full"
           >
-            {isWritePending
+            {isSubmitting
               ? "Submitting to bundler..."
-              : isTxConfirming
-              ? "Waiting for inclusion..."
               : "Submit Sponsored Transaction"}
           </button>
         </div>
@@ -350,8 +429,16 @@ export default function SponsorForm() {
             Your transaction was submitted with gas paid by the Privacy
             Paymaster
           </p>
-          {userOpHash && (
+          {txHash && (
             <div className="mt-4">
+              <p className="text-xs text-slate-500">Transaction Hash</p>
+              <p className="mt-1 break-all font-mono text-xs text-slate-300">
+                {txHash}
+              </p>
+            </div>
+          )}
+          {userOpHash && (
+            <div className="mt-3">
               <p className="text-xs text-slate-500">UserOp Hash</p>
               <p className="mt-1 break-all font-mono text-xs text-slate-300">
                 {userOpHash}
@@ -368,6 +455,11 @@ export default function SponsorForm() {
               setProofError(null);
               setIsProofComplete(false);
               setUserOpHash(null);
+              setTxHash(null);
+              setPaymasterAndData(null);
+              setAccountAddress(null);
+              setInitCode(null);
+              setSubmitError(null);
             }}
             className="btn-secondary mx-auto mt-6"
           >

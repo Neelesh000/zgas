@@ -21,9 +21,9 @@ export const RPC_URLS: Record<number, string> = {
 
 export const CONTRACTS = {
   [BNB_TESTNET_ID]: {
-    privacyPool_BNB_01: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9" as Address,
-    privacyPool_BNB_1: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707" as Address,
-    privacyPool_BNB_10: "0x0165878A594ca255338adfa4d48449f69242Eb8F" as Address,
+    privacyPool_BNB_01: "0x322813Fd9A801c5507c9de605d63CEA4f2CE6c44" as Address,
+    privacyPool_BNB_1: "0xa85233C63b9Ee964Add6F2cffe00Fd84eb32338f" as Address,
+    privacyPool_BNB_10: "0x4A679253410272dd5232B3Ff7cF5dbB88f295319" as Address,
     tokenPool_BUSD_100:
       "0x0000000000000000000000000000000000000000" as Address,
     tokenPool_BUSD_1000:
@@ -31,9 +31,11 @@ export const CONTRACTS = {
     tokenPool_BUSD_10000:
       "0x0000000000000000000000000000000000000000" as Address,
     privacyPaymaster:
-      "0x0000000000000000000000000000000000000000" as Address,
-    aspRegistry: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0" as Address,
-    entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as Address,
+      "0x67d269191c92Caf3cD7723F116c85e6E9bf55933" as Address,
+    aspRegistry: "0x59b670e9fA9D0A427751Af201D676719a970857b" as Address,
+    entryPoint: "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F" as Address,
+    simpleAccountFactory:
+      "0x09635F643e140090A9A8Dcd712eD6285858ceBef" as Address,
   },
   [BNB_MAINNET_ID]: {
     privacyPool_BNB_01: "0x0000000000000000000000000000000000000000" as Address,
@@ -49,6 +51,8 @@ export const CONTRACTS = {
       "0x0000000000000000000000000000000000000000" as Address,
     aspRegistry: "0x0000000000000000000000000000000000000000" as Address,
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" as Address,
+    simpleAccountFactory:
+      "0x0000000000000000000000000000000000000000" as Address,
   },
 };
 
@@ -293,6 +297,104 @@ export const ASP_REGISTRY_ABI = [
   {
     inputs: [{ name: "commitment", type: "bytes32" }],
     name: "isBlocked",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const ENTRY_POINT_ABI = [
+  {
+    inputs: [
+      {
+        components: [
+          { name: "sender", type: "address" },
+          { name: "nonce", type: "uint256" },
+          { name: "initCode", type: "bytes" },
+          { name: "callData", type: "bytes" },
+          { name: "accountGasLimits", type: "bytes32" },
+          { name: "preVerificationGas", type: "uint256" },
+          { name: "gasFees", type: "bytes32" },
+          { name: "paymasterAndData", type: "bytes" },
+          { name: "signature", type: "bytes" },
+        ],
+        name: "ops",
+        type: "tuple[]",
+      },
+      { name: "beneficiary", type: "address" },
+    ],
+    name: "handleOps",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "account", type: "address" },
+      { name: "key", type: "uint192" },
+    ],
+    name: "getNonce",
+    outputs: [{ name: "nonce", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "depositTo",
+    outputs: [],
+    stateMutability: "payable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const SIMPLE_ACCOUNT_FACTORY_ABI = [
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "salt", type: "uint256" },
+    ],
+    name: "createAccount",
+    outputs: [{ name: "ret", type: "address" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "salt", type: "uint256" },
+    ],
+    name: "getAddress",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export const SIMPLE_ACCOUNT_ABI = [
+  {
+    inputs: [
+      { name: "target", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+    ],
+    name: "execute",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
+
+export const PAYMASTER_ABI = [
+  {
+    inputs: [{ name: "", type: "bytes32" }],
+    name: "sponsorshipNullifiers",
     outputs: [{ name: "", type: "bool" }],
     stateMutability: "view",
     type: "function",

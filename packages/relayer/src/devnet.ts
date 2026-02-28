@@ -28,6 +28,15 @@ const POOL_ABI = [
   "function denomination() view returns (uint256)",
 ];
 
+const ENTRY_POINT_ABI = [
+  "function handleOps(tuple(address sender, uint256 nonce, bytes initCode, bytes callData, bytes32 accountGasLimits, uint256 preVerificationGas, bytes32 gasFees, bytes paymasterAndData, bytes signature)[] ops, address payable beneficiary) external",
+  "function getNonce(address sender, uint192 key) view returns (uint256 nonce)",
+  "function getUserOpHash(tuple(address sender, uint256 nonce, bytes initCode, bytes callData, bytes32 accountGasLimits, uint256 preVerificationGas, bytes32 gasFees, bytes paymasterAndData, bytes signature) userOp) view returns (bytes32)",
+];
+
+// Set via deploy logs — update after redeployment
+const ENTRY_POINT_ADDRESS = process.env.ENTRY_POINT_ADDRESS || "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F";
+
 /* -------------------------------------------------------------------------- */
 /*                            In-memory state                                 */
 /* -------------------------------------------------------------------------- */
@@ -38,7 +47,15 @@ interface WithdrawalRecord {
   error?: string;
 }
 
+interface SponsorRecord {
+  status: "queued" | "submitted" | "confirmed" | "failed";
+  txHash?: string;
+  userOpHash?: string;
+  error?: string;
+}
+
 const withdrawals = new Map<string, WithdrawalRecord>();
+const sponsorships = new Map<string, SponsorRecord>();
 
 /* -------------------------------------------------------------------------- */
 /*                              Express app                                   */
@@ -143,6 +160,106 @@ app.get("/api/withdraw/:nullifierHash/status", (req, res) => {
     return;
   }
   res.json({ nullifierHash: req.params.nullifierHash, ...record });
+});
+
+/* ---- Submit sponsored UserOp (mini-bundler) ---- */
+app.post("/api/sponsor", async (req, res) => {
+  try {
+    const {
+      sender,
+      nonce,
+      initCode,
+      callData,
+      accountGasLimits,
+      preVerificationGas,
+      gasFees,
+      paymasterAndData,
+      signature,
+    } = req.body;
+
+    if (!sender || !callData || !paymasterAndData) {
+      res.status(400).json({
+        error: "Missing required fields: sender, callData, paymasterAndData",
+      });
+      return;
+    }
+
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const wallet = new ethers.Wallet(RELAYER_PRIVATE_KEY, provider);
+    const entryPoint = new ethers.Contract(ENTRY_POINT_ADDRESS, ENTRY_POINT_ABI, wallet);
+
+    // Build the PackedUserOperation
+    const userOp = {
+      sender,
+      nonce: nonce || "0x0",
+      initCode: initCode || "0x",
+      callData,
+      accountGasLimits: accountGasLimits || ethers.solidityPacked(
+        ["uint128", "uint128"],
+        [500_000, 500_000]  // verificationGasLimit, callGasLimit
+      ),
+      preVerificationGas: preVerificationGas || 100_000,
+      gasFees: gasFees || ethers.solidityPacked(
+        ["uint128", "uint128"],
+        [1_000_000_000, 1_000_000_000]  // maxPriorityFeePerGas, maxFeePerGas
+      ),
+      paymasterAndData,
+      signature: signature || "0x",
+    };
+
+    // Compute userOpHash for tracking
+    let userOpHash: string;
+    try {
+      userOpHash = await entryPoint.getUserOpHash(userOp);
+    } catch {
+      // If getUserOpHash fails, generate a tracking hash
+      userOpHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify({ sender, nonce: userOp.nonce })));
+    }
+
+    sponsorships.set(userOpHash, { status: "queued", userOpHash });
+
+    console.log(`[Devnet] Processing sponsored UserOp for ${sender}`);
+    console.log(`[Devnet] UserOp hash: ${userOpHash}`);
+
+    // Submit via handleOps — the bundler (our wallet) calls this
+    const tx = await entryPoint.handleOps([userOp], wallet.address, {
+      gasLimit: 2_000_000,
+    });
+
+    sponsorships.set(userOpHash, { status: "submitted", txHash: tx.hash, userOpHash });
+    console.log(`[Devnet] Sponsor tx submitted: ${tx.hash}`);
+
+    // Wait for confirmation in background
+    tx.wait()
+      .then(() => {
+        sponsorships.set(userOpHash, { status: "confirmed", txHash: tx.hash, userOpHash });
+        console.log(`[Devnet] Sponsor tx confirmed: ${tx.hash}`);
+      })
+      .catch((err: Error) => {
+        sponsorships.set(userOpHash, { status: "failed", txHash: tx.hash, userOpHash, error: err.message });
+        console.error(`[Devnet] Sponsor tx failed: ${tx.hash}`, err.message);
+      });
+
+    res.status(202).json({
+      userOpHash,
+      txHash: tx.hash,
+      status: "submitted",
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[Devnet] Sponsor error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+/* ---- Check sponsor status ---- */
+app.get("/api/sponsor/:hash/status", (req, res) => {
+  const record = sponsorships.get(req.params.hash);
+  if (!record) {
+    res.status(404).json({ error: "Sponsored UserOp not found" });
+    return;
+  }
+  res.json(record);
 });
 
 /* ---- Start ---- */
