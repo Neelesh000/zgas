@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { type Address } from "viem";
@@ -33,7 +33,8 @@ export default function WithdrawForm() {
 
   const [noteString, setNoteString] = useState("");
   const [recipient, setRecipient] = useState("");
-  const [useRelayer, setUseRelayer] = useState(true);
+  const [useRelayer, setUseRelayer] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [step, setStep] = useState<WithdrawStep>("input");
   const [proofStep, setProofStep] = useState(-1);
   const [proofError, setProofError] = useState<string | null>(null);
@@ -54,6 +55,13 @@ export default function WithdrawForm() {
 
   const isRecipientValid =
     recipient.length === 42 && recipient.startsWith("0x");
+
+  // Transition to "done" when direct withdrawal tx confirms
+  useEffect(() => {
+    if (isTxConfirmed && step === "submit") {
+      setStep("done");
+    }
+  }, [isTxConfirmed, step]);
 
   const handleGenerateProof = useCallback(async () => {
     if (!parsedNote || !isRecipientValid) return;
@@ -124,6 +132,7 @@ export default function WithdrawForm() {
 
   const handleWithdraw = useCallback(async () => {
     if (!proofData) return;
+    setWithdrawError(null);
 
     try {
       if (useRelayer) {
@@ -143,9 +152,12 @@ export default function WithdrawForm() {
           proofData.aspRoot,
           proofData.poolKey
         );
-        setStep("done");
+        // Don't setStep("done") here — wait for isTxConfirmed via useEffect
       }
     } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Withdrawal failed";
+      setWithdrawError(message);
       console.error("Withdrawal failed:", err);
     }
   }, [
@@ -312,10 +324,10 @@ export default function WithdrawForm() {
             </div>
           </div>
 
-          {writeError && (
+          {(writeError || withdrawError) && (
             <div className="rounded-lg border border-red-800/50 bg-red-900/20 p-3">
               <p className="text-sm text-red-400">
-                {writeError.message?.slice(0, 200)}
+                {writeError?.message?.slice(0, 200) || withdrawError}
               </p>
             </div>
           )}
