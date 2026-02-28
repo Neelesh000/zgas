@@ -12,7 +12,7 @@ export const ACTIVE_CHAIN_ID = BNB_TESTNET_ID;
 
 export const RPC_URLS: Record<number, string> = {
   [BNB_MAINNET_ID]: "https://bsc-dataseed1.binance.org",
-  [BNB_TESTNET_ID]: "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+  [BNB_TESTNET_ID]: process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -21,19 +21,19 @@ export const RPC_URLS: Record<number, string> = {
 
 export const CONTRACTS = {
   [BNB_TESTNET_ID]: {
-    privacyPool_BNB_01: "0x0000000000000000000000000000000000000001" as Address,
-    privacyPool_BNB_1: "0x0000000000000000000000000000000000000002" as Address,
-    privacyPool_BNB_10: "0x0000000000000000000000000000000000000003" as Address,
+    privacyPool_BNB_01: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9" as Address,
+    privacyPool_BNB_1: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707" as Address,
+    privacyPool_BNB_10: "0x0165878A594ca255338adfa4d48449f69242Eb8F" as Address,
     tokenPool_BUSD_100:
-      "0x0000000000000000000000000000000000000004" as Address,
+      "0x0000000000000000000000000000000000000000" as Address,
     tokenPool_BUSD_1000:
-      "0x0000000000000000000000000000000000000005" as Address,
+      "0x0000000000000000000000000000000000000000" as Address,
     tokenPool_BUSD_10000:
-      "0x0000000000000000000000000000000000000006" as Address,
+      "0x0000000000000000000000000000000000000000" as Address,
     privacyPaymaster:
-      "0x0000000000000000000000000000000000000007" as Address,
-    aspRegistry: "0x0000000000000000000000000000000000000008" as Address,
-    entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" as Address,
+      "0x0000000000000000000000000000000000000000" as Address,
+    aspRegistry: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0" as Address,
+    entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as Address,
   },
   [BNB_MAINNET_ID]: {
     privacyPool_BNB_01: "0x0000000000000000000000000000000000000000" as Address,
