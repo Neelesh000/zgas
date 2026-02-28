@@ -2,5 +2,5 @@
 pragma solidity ^0.8.28;
 
 interface IHasher {
-    function poseidon(bytes32[2] calldata inputs) external pure returns (bytes32);
+    function poseidon(bytes32[2] calldata inputs) external view returns (bytes32);
 }

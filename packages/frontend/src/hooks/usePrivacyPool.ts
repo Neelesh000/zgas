@@ -21,6 +21,7 @@ import {
   RELAYER_URL,
   type DenominationOption,
 } from "@/lib/constants";
+import { poseidonHash2, poseidonHash1 } from "@/lib/poseidon";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Types                                     */
@@ -67,43 +68,99 @@ export interface SponsorParams {
 /*                       Note generation (client-side)                        */
 /* -------------------------------------------------------------------------- */
 
-function randomBigInt(nBytes: number): bigint {
-  const buf = new Uint8Array(nBytes);
+const SNARK_FIELD = BigInt(
+  "21888242871839275222246405745257275088548364400416034343698204186575808495617"
+);
+
+function randomFieldElement(): bigint {
+  const buf = new Uint8Array(31);
   crypto.getRandomValues(buf);
-  return BigInt(
-    "0x" +
-      Array.from(buf)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-  );
+  let value = 0n;
+  for (let i = 0; i < buf.length; i++) {
+    value = (value << 8n) | BigInt(buf[i]);
+  }
+  return value % SNARK_FIELD;
 }
 
 function toHex32(val: bigint): string {
   return "0x" + val.toString(16).padStart(64, "0");
 }
 
+const USE_MOCK_PROOFS = process.env.NEXT_PUBLIC_USE_MOCK_PROOFS === "true";
+
 /**
- * Produces commitment = keccak256(abi.encodePacked(secret, nullifier)).
- * This matches the MockHasher on-chain so commitments are consistent
- * between deposit and withdrawal flows.
- * In production this would use Poseidon hash via circomlibjs.
+ * Produces commitment = Poseidon(secret, nullifier).
+ * Falls back to keccak256 in mock mode.
  */
+export async function computeCommitmentAsync(secret: bigint, nullifier: bigint): Promise<string> {
+  if (USE_MOCK_PROOFS) {
+    return keccak256(encodePacked(["uint256", "uint256"], [secret, nullifier]));
+  }
+  const hash = await poseidonHash2(secret, nullifier);
+  return toHex32(hash);
+}
+
+/**
+ * Produces nullifierHash = Poseidon(nullifier).
+ * Falls back to keccak256 in mock mode.
+ */
+export async function computeNullifierHashAsync(nullifier: bigint): Promise<string> {
+  if (USE_MOCK_PROOFS) {
+    return keccak256(encodePacked(["uint256"], [nullifier]));
+  }
+  const hash = await poseidonHash1(nullifier);
+  return toHex32(hash);
+}
+
+/**
+ * Produces sponsorship nullifierHash = Poseidon(nullifier, 2).
+ * Falls back to keccak256 in mock mode.
+ */
+export async function computeSponsorshipNullifierHashAsync(nullifier: bigint): Promise<string> {
+  if (USE_MOCK_PROOFS) {
+    return keccak256(encodePacked(["uint256", "uint256"], [nullifier, 2n]));
+  }
+  const hash = await poseidonHash2(nullifier, 2n);
+  return toHex32(hash);
+}
+
+// Synchronous versions for backward compatibility (mock mode only)
 export function computeCommitment(secret: bigint, nullifier: bigint): string {
   return keccak256(encodePacked(["uint256", "uint256"], [secret, nullifier]));
 }
 
-/**
- * Produces nullifierHash = keccak256(abi.encodePacked(nullifier)).
- * Used to derive the nullifier hash that gets checked on-chain for double-spend prevention.
- */
 export function computeNullifierHash(nullifier: bigint): string {
   return keccak256(encodePacked(["uint256"], [nullifier]));
 }
 
-export function generateNote(denom: DenominationOption): NoteData {
-  const secret = randomBigInt(31);
-  const nullifier = randomBigInt(31);
+export async function generateNoteAsync(
+  denom: DenominationOption
+): Promise<NoteData> {
+  const secret = randomFieldElement();
+  const nullifier = randomFieldElement();
+  const commitment = await computeCommitmentAsync(secret, nullifier);
 
+  const noteString = `pp-${denom.token.toLowerCase()}-${denom.displayAmount.replace(
+    /,/g,
+    ""
+  )}-${toHex32(secret).slice(2)}${toHex32(nullifier).slice(2)}`;
+
+  return {
+    secret: toHex32(secret),
+    nullifier: toHex32(nullifier),
+    commitment,
+    denomination: denom.value,
+    poolKey: denom.poolKey,
+    token: denom.token,
+    noteString,
+  };
+}
+
+export function generateNote(denom: DenominationOption): NoteData {
+  const secret = randomFieldElement();
+  const nullifier = randomFieldElement();
+
+  // Sync version uses keccak256 — only for mock mode
   const commitmentHex = computeCommitment(secret, nullifier);
 
   const noteString = `pp-${denom.token.toLowerCase()}-${denom.displayAmount.replace(
@@ -115,29 +172,6 @@ export function generateNote(denom: DenominationOption): NoteData {
     secret: toHex32(secret),
     nullifier: toHex32(nullifier),
     commitment: commitmentHex,
-    denomination: denom.value,
-    poolKey: denom.poolKey,
-    token: denom.token,
-    noteString,
-  };
-}
-
-export async function generateNoteAsync(
-  denom: DenominationOption
-): Promise<NoteData> {
-  const secret = randomBigInt(31);
-  const nullifier = randomBigInt(31);
-  const commitment = computeCommitment(secret, nullifier);
-
-  const noteString = `pp-${denom.token.toLowerCase()}-${denom.displayAmount.replace(
-    /,/g,
-    ""
-  )}-${toHex32(secret).slice(2)}${toHex32(nullifier).slice(2)}`;
-
-  return {
-    secret: toHex32(secret),
-    nullifier: toHex32(nullifier),
-    commitment,
     denomination: denom.value,
     poolKey: denom.poolKey,
     token: denom.token,
@@ -199,7 +233,6 @@ export function usePrivacyPool() {
         ] as Address;
 
         try {
-          // Read deposit event count as proxy for anonymity set
           const logs = await publicClient.getLogs({
             address: poolAddress,
             event: {
@@ -279,13 +312,11 @@ export function usePrivacyPool() {
           value: BigInt(note.denomination),
         });
       } else {
-        // ERC-20 flow: approve then deposit
         const tokenInfo = DENOMINATIONS.find(
           (d) => d.poolKey === note.poolKey
         );
         if (!tokenInfo) throw new Error("Unknown pool");
 
-        // First approve
         writeContract({
           address: poolAddress,
           abi: TOKEN_POOL_ABI,

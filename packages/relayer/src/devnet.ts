@@ -34,8 +34,26 @@ const ENTRY_POINT_ABI = [
   "function getUserOpHash(tuple(address sender, uint256 nonce, bytes initCode, bytes callData, bytes32 accountGasLimits, uint256 preVerificationGas, bytes32 gasFees, bytes paymasterAndData, bytes signature) userOp) view returns (bytes32)",
 ];
 
+const ASP_REGISTRY_ABI = [
+  "function updateASPRoot(bytes32 newRoot) external",
+  "function getLastASPRoot() view returns (bytes32)",
+];
+
+const DEPOSIT_EVENT_ABI = [
+  "event Deposit(bytes32 indexed commitment, uint32 leafIndex, uint256 timestamp, uint256 denomination)",
+];
+
+const ASP_REGISTRY_ADDRESS = process.env.ASP_REGISTRY_ADDRESS || "0x0165878A594ca255338adfa4d48449f69242Eb8F";
+
+// Known devnet pool addresses
+const DEVNET_POOL_ADDRESSES = [
+  "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6", // 0.1 BNB
+  "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318", // 1 BNB
+  "0x610178dA211FEF7D417bC0e6FeD39F05609AD788", // 10 BNB
+];
+
 // Set via deploy logs — update after redeployment
-const ENTRY_POINT_ADDRESS = process.env.ENTRY_POINT_ADDRESS || "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F";
+const ENTRY_POINT_ADDRESS = process.env.ENTRY_POINT_ADDRESS || "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e";
 
 /* -------------------------------------------------------------------------- */
 /*                            In-memory state                                 */
@@ -260,6 +278,97 @@ app.get("/api/sponsor/:hash/status", (req, res) => {
     return;
   }
   res.json(record);
+});
+
+/* ---- Sync ASP tree (devnet only) ---- */
+app.post("/api/asp/sync", async (req, res) => {
+  try {
+    const poolAddresses: string[] = req.body?.poolAddresses || DEVNET_POOL_ADDRESSES;
+
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const wallet = new ethers.Wallet(RELAYER_PRIVATE_KEY, provider);
+
+    // Collect all deposit commitments from all pools
+    const allCommitments: { commitment: string; leafIndex: number }[] = [];
+
+    for (const poolAddr of poolAddresses) {
+      const pool = new ethers.Contract(poolAddr, DEPOSIT_EVENT_ABI, provider);
+      const logs = await pool.queryFilter(pool.filters.Deposit());
+      for (const log of logs) {
+        const parsed = log as ethers.EventLog;
+        allCommitments.push({
+          commitment: parsed.args[0],
+          leafIndex: allCommitments.length,
+        });
+      }
+    }
+
+    if (allCommitments.length === 0) {
+      res.json({ aspRoot: ethers.ZeroHash, commitmentCount: 0, message: "No deposits found" });
+      return;
+    }
+
+    // Build ASP Merkle tree using Poseidon (via circomlibjs)
+    const { buildPoseidon } = await import("circomlibjs");
+    const poseidon = await buildPoseidon();
+    const F = poseidon.F;
+
+    function poseidonHash2(left: bigint, right: bigint): bigint {
+      const h = poseidon([left, right]);
+      return BigInt(F.toObject(h));
+    }
+
+    const TREE_DEPTH = 20;
+    const zeroValues: bigint[] = new Array(TREE_DEPTH + 1);
+    zeroValues[0] = 0n;
+    for (let i = 1; i <= TREE_DEPTH; i++) {
+      zeroValues[i] = poseidonHash2(zeroValues[i - 1], zeroValues[i - 1]);
+    }
+
+    const layers: bigint[][] = new Array(TREE_DEPTH + 1);
+    for (let i = 0; i <= TREE_DEPTH; i++) layers[i] = [];
+
+    const leaves: bigint[] = [];
+    for (const entry of allCommitments) {
+      const leaf = BigInt(entry.commitment);
+      const index = leaves.length;
+      leaves.push(leaf);
+      layers[0] = [...leaves];
+
+      // Rebuild from this leaf
+      let currentIndex = index;
+      for (let level = 0; level < TREE_DEPTH; level++) {
+        const pairIndex = currentIndex % 2 === 0 ? currentIndex + 1 : currentIndex - 1;
+        const leftIndex = Math.min(currentIndex, pairIndex);
+        const rightIndex = Math.max(currentIndex, pairIndex);
+        const left = layers[level][leftIndex] ?? zeroValues[level];
+        const right = layers[level][rightIndex] ?? zeroValues[level];
+        const parentIndex = Math.floor(currentIndex / 2);
+        layers[level + 1][parentIndex] = poseidonHash2(left, right);
+        currentIndex = parentIndex;
+      }
+    }
+
+    const root = layers[TREE_DEPTH][0];
+    const aspRootHex = "0x" + root.toString(16).padStart(64, "0");
+
+    // Update ASP registry on-chain
+    const aspRegistry = new ethers.Contract(ASP_REGISTRY_ADDRESS, ASP_REGISTRY_ABI, wallet);
+    const tx = await aspRegistry.updateASPRoot(aspRootHex);
+    await tx.wait();
+
+    console.log(`[Devnet] ASP root synced: ${aspRootHex.slice(0, 18)}... (${allCommitments.length} commitments)`);
+
+    res.json({
+      aspRoot: aspRootHex,
+      commitmentCount: allCommitments.length,
+      txHash: tx.hash,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[Devnet] ASP sync error:", message);
+    res.status(500).json({ error: message });
+  }
 });
 
 /* ---- Start ---- */

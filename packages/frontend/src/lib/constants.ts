@@ -21,9 +21,9 @@ export const RPC_URLS: Record<number, string> = {
 
 export const CONTRACTS = {
   [BNB_TESTNET_ID]: {
-    privacyPool_BNB_01: "0x322813Fd9A801c5507c9de605d63CEA4f2CE6c44" as Address,
-    privacyPool_BNB_1: "0xa85233C63b9Ee964Add6F2cffe00Fd84eb32338f" as Address,
-    privacyPool_BNB_10: "0x4A679253410272dd5232B3Ff7cF5dbB88f295319" as Address,
+    privacyPool_BNB_01: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6" as Address,
+    privacyPool_BNB_1: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318" as Address,
+    privacyPool_BNB_10: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788" as Address,
     tokenPool_BUSD_100:
       "0x0000000000000000000000000000000000000000" as Address,
     tokenPool_BUSD_1000:
@@ -31,11 +31,11 @@ export const CONTRACTS = {
     tokenPool_BUSD_10000:
       "0x0000000000000000000000000000000000000000" as Address,
     privacyPaymaster:
-      "0x67d269191c92Caf3cD7723F116c85e6E9bf55933" as Address,
-    aspRegistry: "0x59b670e9fA9D0A427751Af201D676719a970857b" as Address,
-    entryPoint: "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F" as Address,
+      "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82" as Address,
+    aspRegistry: "0x0165878A594ca255338adfa4d48449f69242Eb8F" as Address,
+    entryPoint: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e" as Address,
     simpleAccountFactory:
-      "0x09635F643e140090A9A8Dcd712eD6285858ceBef" as Address,
+      "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0" as Address,
   },
   [BNB_MAINNET_ID]: {
     privacyPool_BNB_01: "0x0000000000000000000000000000000000000000" as Address,

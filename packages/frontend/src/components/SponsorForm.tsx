@@ -1,23 +1,64 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, usePublicClient } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { type Address, encodePacked, keccak256 } from "viem";
+import {
+  type Address,
+  encodeAbiParameters,
+  parseAbiParameters,
+  encodePacked,
+  keccak256,
+} from "viem";
 import {
   usePrivacyPool,
   parseNote,
+  computeCommitmentAsync,
+  computeSponsorshipNullifierHashAsync,
   computeCommitment,
   computeNullifierHash,
 } from "@/hooks/usePrivacyPool";
 import { usePaymaster } from "@/hooks/usePaymaster";
-import { CONTRACTS, ACTIVE_CHAIN_ID, DENOMINATIONS } from "@/lib/constants";
+import {
+  CONTRACTS,
+  ACTIVE_CHAIN_ID,
+  DENOMINATIONS,
+  CIRCUIT_PATHS,
+  RELAYER_URL,
+} from "@/lib/constants";
+import { buildPoolTree, buildASPTree } from "@/lib/merkleTree";
 import ProofProgress from "./ProofProgress";
+
+const USE_MOCK_PROOFS = process.env.NEXT_PUBLIC_USE_MOCK_PROOFS === "true";
 
 type SponsorStep = "connect" | "input" | "proving" | "submit" | "done";
 
+function toHex32(val: bigint): string {
+  return "0x" + val.toString(16).padStart(64, "0");
+}
+
+/** ABI-encode a Groth16 proof for on-chain verification. */
+function encodeProofForContract(proof: {
+  pi_a: string[];
+  pi_b: string[][];
+  pi_c: string[];
+}): `0x${string}` {
+  const pA: [bigint, bigint] = [BigInt(proof.pi_a[0]), BigInt(proof.pi_a[1])];
+  const pB: [[bigint, bigint], [bigint, bigint]] = [
+    [BigInt(proof.pi_b[0][1]), BigInt(proof.pi_b[0][0])],
+    [BigInt(proof.pi_b[1][1]), BigInt(proof.pi_b[1][0])],
+  ];
+  const pC: [bigint, bigint] = [BigInt(proof.pi_c[0]), BigInt(proof.pi_c[1])];
+
+  return encodeAbiParameters(
+    parseAbiParameters("uint256[2], uint256[2][2], uint256[2]"),
+    [pA, pB, pC]
+  ) as `0x${string}`;
+}
+
 export default function SponsorForm() {
   const { isConnected, address } = useAccount();
+  const publicClient = usePublicClient();
   const {
     getASPRoot,
     getPoolRoot,
@@ -27,10 +68,10 @@ export default function SponsorForm() {
     getAccountAddress,
     isAccountDeployed,
     buildPaymasterAndData,
+    buildDummyProofBytes,
     buildUserOp,
     buildInitCode,
     submitSponsoredTx,
-    computeMembershipNullifierHash,
   } = usePaymaster();
 
   const [noteString, setNoteString] = useState("");
@@ -47,7 +88,6 @@ export default function SponsorForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Cached proof data from the proving step
   const [paymasterAndData, setPaymasterAndData] = useState<`0x${string}` | null>(null);
   const [accountAddress, setAccountAddress] = useState<Address | null>(null);
   const [initCode, setInitCode] = useState<`0x${string}` | null>(null);
@@ -58,19 +98,21 @@ export default function SponsorForm() {
     targetAddress.length === 42 && targetAddress.startsWith("0x");
 
   const handleGenerateMembershipProof = useCallback(async () => {
-    if (!parsedNote || !isTargetValid || !address) return;
+    if (!parsedNote || !isTargetValid || !address || !publicClient) return;
 
     setStep("proving");
     setProofError(null);
     setProofStep(0);
 
     try {
-      // Step 0: Parse note, derive commitment + nullifier
+      // Step 0: Parse note, derive commitment + sponsorship nullifier
       const secret = BigInt(parsedNote.secret);
       const nullifier = BigInt(parsedNote.nullifier);
-      const commitment = computeCommitment(secret, nullifier) as `0x${string}`;
 
-      // Determine which pool from the note
+      const commitment = USE_MOCK_PROOFS
+        ? computeCommitment(secret, nullifier) as `0x${string}`
+        : (await computeCommitmentAsync(secret, nullifier)) as `0x${string}`;
+
       const denom = DENOMINATIONS.find(
         (d) =>
           d.token === parsedNote.token &&
@@ -87,22 +129,95 @@ export default function SponsorForm() {
       setProofStep(2);
 
       // Step 2: Fetch pool Merkle root + ASP root
-      const [merkleRoot, aspRoot] = await Promise.all([
+      const [merkleRootOnChain, aspRoot] = await Promise.all([
         getPoolRoot(denom.poolKey),
         getASPRoot(),
       ]);
-      if (!merkleRoot) throw new Error("Failed to fetch pool Merkle root");
+      if (!merkleRootOnChain) throw new Error("Failed to fetch pool Merkle root");
       if (!aspRoot) throw new Error("Failed to fetch ASP root");
 
       setProofStep(3);
 
-      // Step 3: Compute domain-separated nullifierHash (domain=2 for membership)
-      const nullifierHash = computeMembershipNullifierHash(
-        computeNullifierHash(nullifier) as `0x${string}`
-      );
+      let proofBytes: `0x${string}`;
+      let nullifierHash: `0x${string}`;
+      let merkleRoot: `0x${string}`;
 
-      // Build paymasterAndData with dummy proof (MockVerifier accepts anything)
-      const pmData = buildPaymasterAndData(merkleRoot, nullifierHash, aspRoot);
+      let finalAspRoot = aspRoot;
+
+      if (USE_MOCK_PROOFS) {
+        // Mock mode: keccak-based domain-separated nullifier, dummy proof
+        const rawNullifierHash = computeNullifierHash(nullifier) as `0x${string}`;
+        nullifierHash = keccak256(
+          encodePacked(["bytes32", "uint256"], [rawNullifierHash, 2n])
+        );
+        proofBytes = buildDummyProofBytes();
+        merkleRoot = merkleRootOnChain;
+      } else {
+        // Real mode: Poseidon domain-separated nullifier, real Groth16 proof
+        nullifierHash = (await computeSponsorshipNullifierHashAsync(nullifier)) as `0x${string}`;
+
+        const contracts = CONTRACTS[ACTIVE_CHAIN_ID];
+        const poolAddress = contracts[denom.poolKey as keyof typeof contracts] as Address;
+
+        // Sync ASP tree on-chain via relayer (devnet only)
+        const allPoolAddresses = [
+          contracts.privacyPool_BNB_01,
+          contracts.privacyPool_BNB_1,
+          contracts.privacyPool_BNB_10,
+        ].filter((a) => a !== "0x0000000000000000000000000000000000000000") as Address[];
+
+        await fetch(`${RELAYER_URL}/api/asp/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ poolAddresses: allPoolAddresses }),
+        });
+
+        // Reconstruct pool Merkle tree
+        const poolTree = await buildPoolTree(poolAddress, publicClient);
+        const commitmentBigInt = BigInt(commitment);
+        const leafIndex = poolTree.indexOf(commitmentBigInt);
+        if (leafIndex === -1) {
+          throw new Error("Commitment not found in reconstructed Merkle tree.");
+        }
+
+        const poolProof = poolTree.getProof(leafIndex);
+        merkleRoot = toHex32(poolProof.root) as `0x${string}`;
+
+        // Build real ASP tree from all pool deposits
+        const aspTree = await buildASPTree(allPoolAddresses, publicClient);
+        const aspLeafIndex = aspTree.indexOf(commitmentBigInt);
+        if (aspLeafIndex === -1) {
+          throw new Error("Commitment not found in ASP tree. ASP sync may have failed.");
+        }
+        const aspProof = aspTree.getProof(aspLeafIndex);
+        finalAspRoot = toHex32(aspProof.root) as `0x${string}`;
+
+        // Build circuit input for membership
+        const input = {
+          secret: secret.toString(),
+          nullifier: nullifier.toString(),
+          pathElements: poolProof.pathElements.map((e) => e.toString()),
+          pathIndices: poolProof.pathIndices,
+          aspPathElements: aspProof.pathElements.map((e) => e.toString()),
+          aspPathIndices: aspProof.pathIndices,
+          root: poolProof.root.toString(),
+          nullifierHash: BigInt(nullifierHash).toString(),
+          aspRoot: BigInt(finalAspRoot).toString(),
+        };
+
+        // Generate Groth16 proof
+        const snarkjs = await import("snarkjs");
+        const { proof } = await snarkjs.groth16.fullProve(
+          input,
+          CIRCUIT_PATHS.membership.wasm,
+          CIRCUIT_PATHS.membership.zkey
+        );
+
+        proofBytes = encodeProofForContract(proof);
+      }
+
+      // Build paymasterAndData
+      const pmData = buildPaymasterAndData(proofBytes, merkleRoot, nullifierHash, finalAspRoot!);
       setPaymasterAndData(pmData);
 
       // Step 4: Compute SimpleAccount address and check deployment
@@ -117,7 +232,6 @@ export default function SponsorForm() {
       }
 
       setProofStep(4);
-
       setIsProofComplete(true);
       setStep("submit");
     } catch (err: unknown) {
@@ -129,11 +243,12 @@ export default function SponsorForm() {
     parsedNote,
     isTargetValid,
     address,
+    publicClient,
     checkCommitmentOnChain,
     getPoolRoot,
     getASPRoot,
-    computeMembershipNullifierHash,
     buildPaymasterAndData,
+    buildDummyProofBytes,
     getAccountAddress,
     isAccountDeployed,
     buildInitCode,
@@ -149,7 +264,6 @@ export default function SponsorForm() {
       const target = targetAddress as Address;
       const innerCallData = (callData || "0x") as `0x${string}`;
 
-      // Build UserOp
       const userOp = await buildUserOp(
         accountAddress,
         target,
@@ -158,7 +272,6 @@ export default function SponsorForm() {
         initCode || undefined
       );
 
-      // Submit to relayer's mini-bundler
       const result = await submitSponsoredTx(userOp);
 
       setUserOpHash(result.userOpHash);
@@ -355,7 +468,9 @@ export default function SponsorForm() {
         <div className="card space-y-6 animate-fade-in">
           <div className="rounded-lg border border-primary-800/50 bg-primary-900/20 p-4">
             <p className="text-sm text-primary-400">
-              Membership proof verified. Ready to submit sponsored transaction.
+              {USE_MOCK_PROOFS
+                ? "Membership proof prepared (mock mode). Ready to submit."
+                : "Membership proof verified. Ready to submit sponsored transaction."}
             </p>
           </div>
 

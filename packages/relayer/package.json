@@ -13,6 +13,7 @@
     "db:init": "psql $DATABASE_URL -f src/db/schema.sql"
   },
   "dependencies": {
+    "circomlibjs": "^0.1.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.1",

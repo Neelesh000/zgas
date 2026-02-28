@@ -75,40 +75,41 @@ export function usePaymaster() {
   );
 
   /**
-   * Build the 352-byte paymasterData blob.
+   * Build the paymasterData blob from a real or dummy proof.
    * Layout: proof (256 bytes) + merkleRoot (32) + nullifierHash (32) + aspRoot (32)
-   *
-   * For MockVerifier, proof values don't matter — they're accepted regardless.
    */
   const buildPaymasterData = useCallback(
     (
+      proofBytes: `0x${string}`,
       merkleRoot: `0x${string}`,
       nullifierHash: `0x${string}`,
       aspRoot: `0x${string}`
     ): `0x${string}` => {
-      // Dummy proof (MockVerifier accepts anything)
-      const dummyProof = encodeAbiParameters(
-        parseAbiParameters("uint256[2], uint256[2][2], uint256[2]"),
-        [
-          [1n, 2n],
-          [
-            [3n, 4n],
-            [5n, 6n],
-          ],
-          [7n, 8n],
-        ]
-      );
-
-      // Concat: proof (256 bytes) + merkleRoot + nullifierHash + aspRoot
       const roots = encodePacked(
         ["bytes32", "bytes32", "bytes32"],
         [merkleRoot, nullifierHash, aspRoot]
       );
-
-      return `${dummyProof}${roots.slice(2)}` as `0x${string}`;
+      return `${proofBytes}${roots.slice(2)}` as `0x${string}`;
     },
     []
   );
+
+  /**
+   * Build a dummy proof for MockVerifier (256 bytes of ABI-encoded proof components).
+   */
+  const buildDummyProofBytes = useCallback((): `0x${string}` => {
+    return encodeAbiParameters(
+      parseAbiParameters("uint256[2], uint256[2][2], uint256[2]"),
+      [
+        [1n, 2n],
+        [
+          [3n, 4n],
+          [5n, 6n],
+        ],
+        [7n, 8n],
+      ]
+    ) as `0x${string}`;
+  }, []);
 
   /**
    * Build the full paymasterAndData field.
@@ -116,13 +117,13 @@ export function usePaymaster() {
    */
   const buildPaymasterAndData = useCallback(
     (
+      proofBytes: `0x${string}`,
       merkleRoot: `0x${string}`,
       nullifierHash: `0x${string}`,
       aspRoot: `0x${string}`
     ): `0x${string}` => {
-      const paymasterData = buildPaymasterData(merkleRoot, nullifierHash, aspRoot);
+      const paymasterData = buildPaymasterData(proofBytes, merkleRoot, nullifierHash, aspRoot);
 
-      // Pack: paymaster(20 bytes) + verificationGasLimit(16 bytes) + postOpGasLimit(16 bytes) + paymasterData
       const verificationGasLimit = 200_000n;
       const postOpGasLimit = 50_000n;
 
@@ -147,7 +148,6 @@ export function usePaymaster() {
     ): Promise<UserOp> => {
       if (!publicClient) throw new Error("No public client");
 
-      // Get nonce from EntryPoint
       let nonce = 0n;
       try {
         nonce = (await publicClient.readContract({
@@ -160,20 +160,17 @@ export function usePaymaster() {
         // Account doesn't exist yet, nonce = 0
       }
 
-      // Encode the callData as SimpleAccount.execute(target, 0, innerCallData)
       const callData = encodeFunctionData({
         abi: SIMPLE_ACCOUNT_ABI,
         functionName: "execute",
         args: [target, 0n, callDataInner],
       });
 
-      // Pack gas limits: verificationGasLimit (128 bits) || callGasLimit (128 bits)
       const accountGasLimits = encodePacked(
         ["uint128", "uint128"],
         [500_000n, 500_000n]
       );
 
-      // Pack gas fees: maxPriorityFeePerGas (128 bits) || maxFeePerGas (128 bits)
       const gasFees = encodePacked(
         ["uint128", "uint128"],
         [1_000_000_000n, 1_000_000_000n]
@@ -243,26 +240,15 @@ export function usePaymaster() {
     []
   );
 
-  /** Compute domain-separated nullifierHash for membership (domain = 2) */
-  const computeMembershipNullifierHash = useCallback(
-    (nullifier: `0x${string}`): `0x${string}` => {
-      // Domain-separated: keccak256(abi.encodePacked(nullifier, uint256(2)))
-      return keccak256(
-        encodePacked(["bytes32", "uint256"], [nullifier as `0x${string}`, 2n])
-      );
-    },
-    []
-  );
-
   return {
     getAccountAddress,
     isAccountDeployed,
     buildPaymasterData,
     buildPaymasterAndData,
+    buildDummyProofBytes,
     buildUserOp,
     buildInitCode,
     submitSponsoredTx,
     getSponsorStatus,
-    computeMembershipNullifierHash,
   };
 }

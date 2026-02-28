@@ -7,6 +7,9 @@ BUILD_DIR="$ROOT_DIR/build"
 PTAU_DIR="$ROOT_DIR/ptau"
 CIRCUITS_DIR="$ROOT_DIR/circuits"
 
+# Use local snarkjs from node_modules
+export PATH="$ROOT_DIR/node_modules/.bin:$PATH"
+
 mkdir -p "$BUILD_DIR" "$PTAU_DIR"
 
 PTAU_FILE="$PTAU_DIR/powersOfTau28_hez_final_17.ptau"

@@ -1,22 +1,62 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, usePublicClient } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { type Address } from "viem";
+import {
+  type Address,
+  encodeAbiParameters,
+  parseAbiParameters,
+} from "viem";
 import {
   usePrivacyPool,
   parseNote,
+  computeCommitmentAsync,
+  computeNullifierHashAsync,
   computeCommitment,
   computeNullifierHash,
 } from "@/hooks/usePrivacyPool";
-import { RELAYER_FEE_PERCENT, CONTRACTS, ACTIVE_CHAIN_ID } from "@/lib/constants";
+import {
+  RELAYER_FEE_PERCENT,
+  RELAYER_URL,
+  CONTRACTS,
+  ACTIVE_CHAIN_ID,
+  CIRCUIT_PATHS,
+} from "@/lib/constants";
+import { buildPoolTree, buildASPTree } from "@/lib/merkleTree";
 import ProofProgress from "./ProofProgress";
+
+const USE_MOCK_PROOFS = process.env.NEXT_PUBLIC_USE_MOCK_PROOFS === "true";
 
 type WithdrawStep = "input" | "proving" | "submit" | "done";
 
+function toHex32(val: bigint): string {
+  return "0x" + val.toString(16).padStart(64, "0");
+}
+
+/** ABI-encode a Groth16 proof for on-chain verification. */
+function encodeProofForContract(proof: {
+  pi_a: string[];
+  pi_b: string[][];
+  pi_c: string[];
+}): `0x${string}` {
+  const pA: [bigint, bigint] = [BigInt(proof.pi_a[0]), BigInt(proof.pi_a[1])];
+  // snarkjs outputs B in a different order than the contract expects
+  const pB: [[bigint, bigint], [bigint, bigint]] = [
+    [BigInt(proof.pi_b[0][1]), BigInt(proof.pi_b[0][0])],
+    [BigInt(proof.pi_b[1][1]), BigInt(proof.pi_b[1][0])],
+  ];
+  const pC: [bigint, bigint] = [BigInt(proof.pi_c[0]), BigInt(proof.pi_c[1])];
+
+  return encodeAbiParameters(
+    parseAbiParameters("uint256[2], uint256[2][2], uint256[2]"),
+    [pA, pB, pC]
+  ) as `0x${string}`;
+}
+
 export default function WithdrawForm() {
   const { isConnected } = useAccount();
+  const publicClient = usePublicClient();
   const {
     withdrawViaRelayer,
     withdrawDirect,
@@ -56,7 +96,6 @@ export default function WithdrawForm() {
   const isRecipientValid =
     recipient.length === 42 && recipient.startsWith("0x");
 
-  // Transition to "done" when direct withdrawal tx confirms
   useEffect(() => {
     if (isTxConfirmed && step === "submit") {
       setStep("done");
@@ -64,18 +103,23 @@ export default function WithdrawForm() {
   }, [isTxConfirmed, step]);
 
   const handleGenerateProof = useCallback(async () => {
-    if (!parsedNote || !isRecipientValid) return;
+    if (!parsedNote || !isRecipientValid || !publicClient) return;
 
     setStep("proving");
     setProofError(null);
     setProofStep(0);
 
     try {
-      // Step 0: Derive commitment from note and validate
       const secret = BigInt(parsedNote.secret);
       const nullifier = BigInt(parsedNote.nullifier);
-      const commitment = computeCommitment(secret, nullifier) as `0x${string}`;
-      const nullifierHash = computeNullifierHash(nullifier) as `0x${string}`;
+
+      // Step 0: Derive commitment + nullifierHash
+      const commitment = USE_MOCK_PROOFS
+        ? computeCommitment(secret, nullifier) as `0x${string}`
+        : (await computeCommitmentAsync(secret, nullifier)) as `0x${string}`;
+      const nullifierHash = USE_MOCK_PROOFS
+        ? computeNullifierHash(nullifier) as `0x${string}`
+        : (await computeNullifierHashAsync(nullifier)) as `0x${string}`;
       const poolKey = `privacyPool_${parsedNote.token}_${parsedNote.amount.replace(".", "")}`;
 
       setProofStep(1);
@@ -96,29 +140,103 @@ export default function WithdrawForm() {
       }
       setProofStep(3);
 
-      // Step 3: Fetch real pool root and ASP root
-      const poolRoot = await getPoolRoot(poolKey);
-      if (!poolRoot) {
-        throw new Error("Failed to fetch pool Merkle root from chain.");
-      }
+      // Step 3: Fetch ASP root
       const aspRoot = await getASPRoot();
       if (!aspRoot) {
         throw new Error("Failed to fetch ASP root from chain.");
       }
+
+      let encodedProof: `0x${string}`;
+      let poolRoot: `0x${string}`;
+      let finalAspRoot = aspRoot;
+
+      if (USE_MOCK_PROOFS) {
+        // Mock mode: dummy proof, fetch root from chain
+        const fetchedRoot = await getPoolRoot(poolKey);
+        if (!fetchedRoot) throw new Error("Failed to fetch pool Merkle root.");
+        poolRoot = fetchedRoot;
+        encodedProof = ("0x" + "00".repeat(256)) as `0x${string}`;
+      } else {
+        // Real mode: reconstruct Merkle tree, generate Groth16 proof
+        setProofStep(4);
+
+        const contracts = CONTRACTS[ACTIVE_CHAIN_ID];
+        const poolAddress = contracts[poolKey as keyof typeof contracts] as Address;
+
+        // Sync ASP tree on-chain via relayer (devnet only)
+        const allPoolAddresses = [
+          contracts.privacyPool_BNB_01,
+          contracts.privacyPool_BNB_1,
+          contracts.privacyPool_BNB_10,
+        ].filter((a) => a !== "0x0000000000000000000000000000000000000000") as Address[];
+
+        await fetch(`${RELAYER_URL}/api/asp/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ poolAddresses: allPoolAddresses }),
+        });
+
+        // Reconstruct pool Merkle tree from Deposit events
+        const poolTree = await buildPoolTree(poolAddress, publicClient);
+        const commitmentBigInt = BigInt(commitment);
+        const leafIndex = poolTree.indexOf(commitmentBigInt);
+        if (leafIndex === -1) {
+          throw new Error("Commitment not found in reconstructed Merkle tree.");
+        }
+
+        const poolProof = poolTree.getProof(leafIndex);
+        poolRoot = toHex32(poolProof.root) as `0x${string}`;
+
+        // Build real ASP tree from all pool deposits
+        const aspTree = await buildASPTree(allPoolAddresses, publicClient);
+        const aspLeafIndex = aspTree.indexOf(commitmentBigInt);
+        if (aspLeafIndex === -1) {
+          throw new Error("Commitment not found in ASP tree. ASP sync may have failed.");
+        }
+        const aspProof = aspTree.getProof(aspLeafIndex);
+
+        // Use the ASP root from the synced tree (it changed on-chain)
+        const syncedAspRoot = toHex32(aspProof.root) as `0x${string}`;
+        finalAspRoot = syncedAspRoot;
+
+        // Build circuit input
+        const recipientBigInt = BigInt(recipient);
+        const input = {
+          // Private inputs
+          secret: secret.toString(),
+          nullifier: nullifier.toString(),
+          pathElements: poolProof.pathElements.map((e) => e.toString()),
+          pathIndices: poolProof.pathIndices,
+          aspPathElements: aspProof.pathElements.map((e) => e.toString()),
+          aspPathIndices: aspProof.pathIndices,
+          // Public inputs
+          root: poolProof.root.toString(),
+          nullifierHash: BigInt(nullifierHash).toString(),
+          recipient: recipientBigInt.toString(),
+          relayer: "0",
+          fee: "0",
+          refund: "0",
+          aspRoot: BigInt(syncedAspRoot).toString(),
+        };
+
+        // Generate Groth16 proof via snarkjs
+        const snarkjs = await import("snarkjs");
+        const { proof } = await snarkjs.groth16.fullProve(
+          input,
+          CIRCUIT_PATHS.withdraw.wasm,
+          CIRCUIT_PATHS.withdraw.zkey
+        );
+
+        encodedProof = encodeProofForContract(proof);
+      }
+
       setProofStep(4);
 
-      // Step 4: Construct proof data
-      // In production, this would call snarkjs.groth16.fullProve via a Web Worker
-      // For devnet with MockVerifier, we use a properly-encoded dummy proof
-      // but with real on-chain roots and nullifier hash
-      const dummyProof = ("0x" +
-        "00".repeat(256)) as `0x${string}`;
-
       setProofData({
-        proof: dummyProof,
+        proof: encodedProof,
         root: poolRoot,
         nullifierHash,
-        aspRoot,
+        aspRoot: finalAspRoot!,
         poolKey,
       });
       setIsProofComplete(true);
@@ -128,7 +246,7 @@ export default function WithdrawForm() {
         err instanceof Error ? err.message : "Unknown error during proving";
       setProofError(message);
     }
-  }, [parsedNote, isRecipientValid, checkCommitmentOnChain, checkNullifierSpent, getPoolRoot, getASPRoot]);
+  }, [parsedNote, isRecipientValid, publicClient, checkCommitmentOnChain, checkNullifierSpent, getPoolRoot, getASPRoot, recipient]);
 
   const handleWithdraw = useCallback(async () => {
     if (!proofData) return;
@@ -159,7 +277,6 @@ export default function WithdrawForm() {
           proofData.aspRoot,
           proofData.poolKey
         );
-        // Don't setStep("done") here — wait for isTxConfirmed via useEffect
       }
     } catch (err) {
       const message =
@@ -294,7 +411,9 @@ export default function WithdrawForm() {
         <div className="card space-y-6 animate-fade-in">
           <div className="rounded-lg border border-primary-800/50 bg-primary-900/20 p-4">
             <p className="text-sm text-primary-400">
-              ZK proof generated and verified locally. Ready to submit.
+              {USE_MOCK_PROOFS
+                ? "Proof data prepared (mock mode). Ready to submit."
+                : "ZK proof generated and verified locally. Ready to submit."}
             </p>
           </div>
 
