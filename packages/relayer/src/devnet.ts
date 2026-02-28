@@ -130,7 +130,7 @@ app.post("/api/withdraw", async (req, res) => {
       merkleRoot,
       nullifierHash,
       recipient,
-      wallet.address, // relayer = our address
+      ethers.ZeroAddress, // must match relayer value used in proof generation (0)
       fee || "0",
       refund || "0",
       aspRoot
@@ -309,7 +309,8 @@ app.post("/api/asp/sync", async (req, res) => {
     }
 
     // Build ASP Merkle tree using Poseidon (via circomlibjs)
-    const { buildPoseidon } = await import("circomlibjs");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { buildPoseidon } = require("circomlibjs") as { buildPoseidon: () => Promise<any> };
     const poseidon = await buildPoseidon();
     const F = poseidon.F;
 
