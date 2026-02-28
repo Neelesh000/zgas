@@ -8,7 +8,7 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { parseEther, type Address, type Hash, encodePacked } from "viem";
+import { parseEther, type Address, type Hash, encodePacked, keccak256 } from "viem";
 import {
   CONTRACTS,
   ACTIVE_CHAIN_ID,
@@ -76,48 +76,28 @@ function toHex32(val: bigint): string {
 }
 
 /**
- * Produces a simple commitment = keccak256(secret || nullifier).
- * In production this would use Poseidon hash via circomlibjs, but we keep it
- * simple here so the frontend can work without the compiled Poseidon WASM.
+ * Produces commitment = keccak256(abi.encodePacked(secret, nullifier)).
+ * This matches the MockHasher on-chain so commitments are consistent
+ * between deposit and withdrawal flows.
+ * In production this would use Poseidon hash via circomlibjs.
  */
-async function computeCommitment(
-  secret: bigint,
-  nullifier: bigint
-): Promise<string> {
-  const data = encodePacked(
-    ["uint256", "uint256"],
-    [secret, nullifier]
-  );
-  // Use SubtleCrypto as a stand-in; real impl uses Poseidon
-  const bytes = hexToBytes(data);
-  const hashBuffer = await crypto.subtle.digest(
-    "SHA-256",
-    new Uint8Array(bytes).buffer as ArrayBuffer
-  );
-  const hashArray = new Uint8Array(hashBuffer);
-  return (
-    "0x" +
-    Array.from(hashArray)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-  );
+export function computeCommitment(secret: bigint, nullifier: bigint): string {
+  return keccak256(encodePacked(["uint256", "uint256"], [secret, nullifier]));
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return bytes;
+/**
+ * Produces nullifierHash = keccak256(abi.encodePacked(nullifier)).
+ * Used to derive the nullifier hash that gets checked on-chain for double-spend prevention.
+ */
+export function computeNullifierHash(nullifier: bigint): string {
+  return keccak256(encodePacked(["uint256"], [nullifier]));
 }
 
 export function generateNote(denom: DenominationOption): NoteData {
   const secret = randomBigInt(31);
   const nullifier = randomBigInt(31);
 
-  // Synchronous placeholder commitment (will be replaced with async Poseidon)
-  const commitmentHex = toHex32(secret ^ nullifier); // XOR placeholder
+  const commitmentHex = computeCommitment(secret, nullifier);
 
   const noteString = `pp-${denom.token.toLowerCase()}-${denom.displayAmount.replace(
     /,/g,
@@ -140,7 +120,7 @@ export async function generateNoteAsync(
 ): Promise<NoteData> {
   const secret = randomBigInt(31);
   const nullifier = randomBigInt(31);
-  const commitment = await computeCommitment(secret, nullifier);
+  const commitment = computeCommitment(secret, nullifier);
 
   const noteString = `pp-${denom.token.toLowerCase()}-${denom.displayAmount.replace(
     /,/g,
@@ -383,6 +363,73 @@ export function usePrivacyPool() {
     }
   }, [publicClient, contracts]);
 
+  /* ---- Fetch pool Merkle root ---- */
+  const getPoolRoot = useCallback(
+    async (poolKey: string): Promise<`0x${string}` | null> => {
+      if (!publicClient) return null;
+      const poolAddress = contracts[poolKey as keyof typeof contracts] as Address;
+      try {
+        const root = await publicClient.readContract({
+          address: poolAddress,
+          abi: [
+            {
+              inputs: [],
+              name: "getLastRoot",
+              outputs: [{ name: "", type: "bytes32" }],
+              stateMutability: "view",
+              type: "function",
+            },
+          ] as const,
+          functionName: "getLastRoot",
+        });
+        return root as `0x${string}`;
+      } catch {
+        return null;
+      }
+    },
+    [publicClient, contracts]
+  );
+
+  /* ---- Check commitment exists on-chain ---- */
+  const checkCommitmentOnChain = useCallback(
+    async (commitment: `0x${string}`, poolKey: string): Promise<boolean> => {
+      if (!publicClient) return false;
+      const poolAddress = contracts[poolKey as keyof typeof contracts] as Address;
+      try {
+        const exists = await publicClient.readContract({
+          address: poolAddress,
+          abi: PRIVACY_POOL_ABI,
+          functionName: "commitments",
+          args: [commitment],
+        });
+        return exists as boolean;
+      } catch {
+        return false;
+      }
+    },
+    [publicClient, contracts]
+  );
+
+  /* ---- Check nullifier already spent ---- */
+  const checkNullifierSpent = useCallback(
+    async (nullifierHash: `0x${string}`, poolKey: string): Promise<boolean> => {
+      if (!publicClient) return false;
+      const poolAddress = contracts[poolKey as keyof typeof contracts] as Address;
+      try {
+        const spent = await publicClient.readContract({
+          address: poolAddress,
+          abi: PRIVACY_POOL_ABI,
+          functionName: "nullifierHashes",
+          args: [nullifierHash],
+        });
+        return spent as boolean;
+      } catch {
+        return false;
+      }
+    },
+    [publicClient, contracts]
+  );
+
   return {
     // State
     address,
@@ -401,6 +448,9 @@ export function usePrivacyPool() {
     withdrawViaRelayer,
     withdrawDirect,
     getASPRoot,
+    getPoolRoot,
+    checkCommitmentOnChain,
+    checkNullifierSpent,
     generateNote,
     generateNoteAsync,
     parseNote,

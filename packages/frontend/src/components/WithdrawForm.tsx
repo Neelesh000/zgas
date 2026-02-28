@@ -4,7 +4,12 @@ import { useState, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { type Address } from "viem";
-import { usePrivacyPool, parseNote } from "@/hooks/usePrivacyPool";
+import {
+  usePrivacyPool,
+  parseNote,
+  computeCommitment,
+  computeNullifierHash,
+} from "@/hooks/usePrivacyPool";
 import { RELAYER_FEE_PERCENT } from "@/lib/constants";
 import ProofProgress from "./ProofProgress";
 
@@ -15,6 +20,10 @@ export default function WithdrawForm() {
   const {
     withdrawViaRelayer,
     withdrawDirect,
+    checkCommitmentOnChain,
+    checkNullifierSpent,
+    getPoolRoot,
+    getASPRoot,
     isWritePending,
     isTxConfirming,
     isTxConfirmed,
@@ -54,40 +63,56 @@ export default function WithdrawForm() {
     setProofStep(0);
 
     try {
-      // Step 0: Prepare inputs
-      await new Promise((r) => setTimeout(r, 800));
+      // Step 0: Derive commitment from note and validate
+      const secret = BigInt(parsedNote.secret);
+      const nullifier = BigInt(parsedNote.nullifier);
+      const commitment = computeCommitment(secret, nullifier) as `0x${string}`;
+      const nullifierHash = computeNullifierHash(nullifier) as `0x${string}`;
+      const poolKey = `privacyPool_${parsedNote.token}_${parsedNote.amount.replace(".", "")}`;
+
       setProofStep(1);
 
-      // Step 1: Load circuit
-      await new Promise((r) => setTimeout(r, 1200));
+      // Step 1: Check commitment exists on-chain
+      const commitmentExists = await checkCommitmentOnChain(commitment, poolKey);
+      if (!commitmentExists) {
+        throw new Error(
+          "Commitment not found on-chain. This note may be invalid, modified, or not yet deposited."
+        );
+      }
       setProofStep(2);
 
-      // Step 2: Compute witness
-      await new Promise((r) => setTimeout(r, 2000));
+      // Step 2: Check nullifier hasn't been spent
+      const alreadySpent = await checkNullifierSpent(nullifierHash, poolKey);
+      if (alreadySpent) {
+        throw new Error("This note has already been withdrawn (nullifier spent).");
+      }
       setProofStep(3);
 
-      // Step 3: Generate proof
-      // In production, this would call snarkjs.groth16.fullProve via a Web Worker
-      // For now we simulate the delay
-      await new Promise((r) => setTimeout(r, 3000));
+      // Step 3: Fetch real pool root and ASP root
+      const poolRoot = await getPoolRoot(poolKey);
+      if (!poolRoot) {
+        throw new Error("Failed to fetch pool Merkle root from chain.");
+      }
+      const aspRoot = await getASPRoot();
+      if (!aspRoot) {
+        throw new Error("Failed to fetch ASP root from chain.");
+      }
       setProofStep(4);
 
-      // Step 4: Verify locally
-      await new Promise((r) => setTimeout(r, 500));
+      // Step 4: Construct proof data
+      // In production, this would call snarkjs.groth16.fullProve via a Web Worker
+      // For devnet with MockVerifier, we use a properly-encoded dummy proof
+      // but with real on-chain roots and nullifier hash
+      const dummyProof = ("0x" +
+        "00".repeat(256)) as `0x${string}`;
 
-      // Simulated proof data
-      const simulatedProofData = {
-        proof: "0x" + "00".repeat(256) as `0x${string}`,
-        root: "0x" + "00".repeat(32) as `0x${string}`,
-        nullifierHash: "0x" + "00".repeat(32) as `0x${string}`,
-        aspRoot: "0x" + "00".repeat(32) as `0x${string}`,
-        poolKey: `privacyPool_${parsedNote.token}_${parsedNote.amount.replace(
-          ".",
-          ""
-        )}`,
-      };
-
-      setProofData(simulatedProofData);
+      setProofData({
+        proof: dummyProof,
+        root: poolRoot,
+        nullifierHash,
+        aspRoot,
+        poolKey,
+      });
       setIsProofComplete(true);
       setStep("submit");
     } catch (err: unknown) {
@@ -95,7 +120,7 @@ export default function WithdrawForm() {
         err instanceof Error ? err.message : "Unknown error during proving";
       setProofError(message);
     }
-  }, [parsedNote, isRecipientValid]);
+  }, [parsedNote, isRecipientValid, checkCommitmentOnChain, checkNullifierSpent, getPoolRoot, getASPRoot]);
 
   const handleWithdraw = useCallback(async () => {
     if (!proofData) return;
