@@ -10,7 +10,7 @@ import {
   computeCommitment,
   computeNullifierHash,
 } from "@/hooks/usePrivacyPool";
-import { RELAYER_FEE_PERCENT } from "@/lib/constants";
+import { RELAYER_FEE_PERCENT, CONTRACTS, ACTIVE_CHAIN_ID } from "@/lib/constants";
 import ProofProgress from "./ProofProgress";
 
 type WithdrawStep = "input" | "proving" | "submit" | "done";
@@ -136,10 +136,17 @@ export default function WithdrawForm() {
 
     try {
       if (useRelayer) {
+        const contracts = CONTRACTS[ACTIVE_CHAIN_ID];
+        const poolAddress = contracts[proofData.poolKey as keyof typeof contracts];
         const result = await withdrawViaRelayer({
           noteString: noteString.trim(),
           recipientAddress: recipient as Address,
           useRelayer: true,
+          proof: proofData.proof,
+          merkleRoot: proofData.root,
+          nullifierHash: proofData.nullifierHash,
+          aspRoot: proofData.aspRoot,
+          poolAddress: poolAddress as string,
         });
         setRelayerResult(result);
         setStep("done");

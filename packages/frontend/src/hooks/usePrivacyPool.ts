@@ -48,6 +48,13 @@ export interface WithdrawParams {
   noteString: string;
   recipientAddress: Address;
   useRelayer: boolean;
+  proof?: string;
+  merkleRoot?: string;
+  nullifierHash?: string;
+  fee?: string;
+  refund?: string;
+  aspRoot?: string;
+  poolAddress?: string;
 }
 
 export interface SponsorParams {
@@ -296,12 +303,18 @@ export function usePrivacyPool() {
       const parsed = parseNote(params.noteString);
       if (!parsed) throw new Error("Invalid note format");
 
-      const response = await fetch(`${RELAYER_URL}/relay`, {
+      const response = await fetch(`${RELAYER_URL}/api/withdraw`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          note: params.noteString,
+          proof: params.proof,
+          merkleRoot: params.merkleRoot,
+          nullifierHash: params.nullifierHash,
           recipient: params.recipientAddress,
+          fee: params.fee || "0",
+          refund: params.refund || "0",
+          aspRoot: params.aspRoot,
+          poolAddress: params.poolAddress,
         }),
       });
 
