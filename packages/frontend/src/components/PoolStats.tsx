@@ -92,7 +92,7 @@ export default function PoolStats() {
                   <div className="flex items-center gap-2">
                     <span
                       className={`inline-block h-2.5 w-2.5 rounded-full ${
-                        pool.token === "BNB" ? "bg-yellow-400" : "bg-blue-400"
+                        pool.token === "BNB" ? "bg-yellow-400 shadow-[0_0_4px_rgba(250,204,21,0.4)]" : "bg-blue-400 shadow-[0_0_4px_rgba(96,165,250,0.4)]"
                       }`}
                     />
                     <span className="text-sm font-medium text-slate-300">
@@ -112,8 +112,8 @@ export default function PoolStats() {
                   <div
                     className={`h-full rounded-full transition-all duration-700 ${
                       pool.token === "BNB"
-                        ? "bg-gradient-to-r from-yellow-600 to-yellow-400"
-                        : "bg-gradient-to-r from-blue-600 to-blue-400"
+                        ? "bg-gradient-to-r from-yellow-600 to-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.2)]"
+                        : "bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.2)]"
                     }`}
                     style={{ width: `${Math.max(barWidth, 2)}%` }}
                   />

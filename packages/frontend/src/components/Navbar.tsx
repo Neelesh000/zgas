@@ -20,7 +20,7 @@ export default function Navbar() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-500 shadow-neon">
             <svg
               className="h-5 w-5 text-white"
               fill="none"
@@ -36,7 +36,7 @@ export default function Navbar() {
             </svg>
           </div>
           <span className="text-lg font-bold text-white">
-            Privacy<span className="text-primary-400">Pay</span>
+            Z<span className="text-primary-400">Gas</span>
           </span>
         </Link>
 
@@ -50,7 +50,7 @@ export default function Navbar() {
                 href={link.href}
                 className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-surface-200 text-primary-400"
+                    ? "bg-surface-200 text-primary-400 shadow-[0_0_6px_rgba(0,255,163,0.2)]"
                     : "text-slate-400 hover:bg-surface-200 hover:text-white"
                 }`}
               >
@@ -71,7 +71,7 @@ export default function Navbar() {
       </div>
 
       {/* Mobile navigation */}
-      <div className="flex items-center gap-1 overflow-x-auto border-t border-surface-300 px-4 py-2 md:hidden">
+      <div className="flex items-center gap-1 overflow-x-auto border-t border-surface-300 shadow-[0_1px_10px_rgba(0,255,163,0.08)] px-4 py-2 md:hidden">
         {NAV_LINKS.map((link) => {
           const isActive = pathname === link.href;
           return (

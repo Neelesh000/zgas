@@ -123,7 +123,7 @@ export default function StatsPage() {
       <div className="card space-y-4">
         <h2 className="text-lg font-semibold text-white">Gas Sponsorship</h2>
         <p className="text-sm text-slate-400">
-          The ERC-4337 Privacy Paymaster sponsors gas for wallets that prove pool
+          The ERC-4337 ZGas Paymaster sponsors gas for wallets that prove pool
           membership via ZK proofs.
         </p>
 

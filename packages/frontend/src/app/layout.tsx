@@ -15,7 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Privacy Paymaster | Private Gas Sponsorship on BNB Chain",
+  title: "ZGas | Private Gas Sponsorship on BNB Chain",
   description:
     "Deposit into privacy pools, withdraw with ZK proofs, and get gas sponsored — all without revealing your identity. Built on BNB Chain with ERC-4337.",
   keywords: [
@@ -67,7 +67,7 @@ export default function RootLayout({
                     </svg>
                   </div>
                   <span className="text-sm text-slate-500">
-                    Privacy Paymaster
+                    ZGas
                   </span>
                 </div>
                 <p className="text-xs text-slate-600">

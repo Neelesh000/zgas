@@ -317,7 +317,7 @@ export default function SponsorForm() {
           </div>
           <div>
             <h3 className="font-semibold text-white">
-              Gas Sponsorship via Privacy Paymaster
+              Gas Sponsorship via ZGas
             </h3>
             <p className="mt-1 text-sm text-slate-400">
               Use a fresh wallet and prove pool membership with a ZK proof.
@@ -426,7 +426,7 @@ export default function SponsorForm() {
             </div>
             <p className="mt-2 text-xs text-slate-500">
               This wallet will send the transaction. Gas is paid by the
-              Privacy Paymaster.
+              ZGas Paymaster.
             </p>
           </div>
 
@@ -541,7 +541,7 @@ export default function SponsorForm() {
             Transaction Sponsored!
           </h3>
           <p className="mt-2 text-sm text-slate-400">
-            Your transaction was submitted with gas paid by the Privacy
+            Your transaction was submitted with gas paid by the ZGas
             Paymaster
           </p>
           {txHash && (

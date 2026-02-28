@@ -64,7 +64,7 @@ export default function DepositForm() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `privacy-paymaster-note-${Date.now()}.txt`;
+    a.download = `zgas-note-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     setNoteSaved(true);
@@ -130,7 +130,7 @@ export default function DepositForm() {
                   isDone
                     ? "bg-primary-600 text-white"
                     : isActive
-                    ? "border-2 border-primary-500 text-primary-400"
+                    ? "border-2 border-primary-500 text-primary-400 shadow-[0_0_8px_rgba(0,255,163,0.3)]"
                     : "border border-surface-400 text-slate-500"
                 }`}
               >
@@ -205,7 +205,7 @@ export default function DepositForm() {
                   onClick={() => setSelectedDenom(denom)}
                   className={`card-hover cursor-pointer text-left ${
                     selectedDenom?.value === denom.value
-                      ? "!border-primary-600 !bg-primary-900/20"
+                      ? "!border-primary-600 !bg-primary-900/20 shadow-neon"
                       : ""
                   }`}
                 >

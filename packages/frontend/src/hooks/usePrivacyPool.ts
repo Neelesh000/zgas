@@ -219,12 +219,16 @@ export function usePrivacyPool() {
 
   const contracts = CONTRACTS[ACTIVE_CHAIN_ID];
 
-  /* ---- Fetch pool stats ---- */
+  /* ---- Fetch pool stats (chunked for Alchemy free tier) ---- */
+  const DEPLOY_BLOCK = 92962584n;
+  const CHUNK = 9n;
+
   const fetchPoolStats = useCallback(async () => {
     if (!publicClient) return;
     setIsLoading(true);
 
     try {
+      const latestBlock = await publicClient.getBlockNumber();
       const statEntries: PoolStatEntry[] = [];
 
       for (const denom of DENOMINATIONS) {
@@ -233,40 +237,48 @@ export function usePrivacyPool() {
         ] as Address;
 
         try {
-          const logs = await publicClient.getLogs({
-            address: poolAddress,
-            event: {
-              type: "event",
-              name: "Deposit",
-              inputs: [
-                { type: "bytes32", name: "commitment", indexed: true },
-                { type: "uint32", name: "leafIndex", indexed: false },
-                { type: "uint256", name: "timestamp", indexed: false },
-                { type: "uint256", name: "denomination", indexed: false },
-              ],
-            },
-            fromBlock: "earliest",
-            toBlock: "latest",
-          });
+          // Chunked deposit log fetching
+          const depositEvent = {
+            type: "event" as const,
+            name: "Deposit" as const,
+            inputs: [
+              { type: "bytes32" as const, name: "commitment" as const, indexed: true },
+              { type: "uint32" as const, name: "leafIndex" as const, indexed: false },
+              { type: "uint256" as const, name: "timestamp" as const, indexed: false },
+              { type: "uint256" as const, name: "denomination" as const, indexed: false },
+            ],
+          };
 
-          const withdrawLogs = await publicClient.getLogs({
-            address: poolAddress,
-            event: {
-              type: "event",
-              name: "Withdrawal",
-              inputs: [
-                { type: "address", name: "to", indexed: false },
-                { type: "bytes32", name: "nullifierHash", indexed: false },
-                { type: "address", name: "relayer", indexed: true },
-                { type: "uint256", name: "fee", indexed: false },
-              ],
-            },
-            fromBlock: "earliest",
-            toBlock: "latest",
-          });
+          const withdrawEvent = {
+            type: "event" as const,
+            name: "Withdrawal" as const,
+            inputs: [
+              { type: "address" as const, name: "to" as const, indexed: false },
+              { type: "bytes32" as const, name: "nullifierHash" as const, indexed: false },
+              { type: "address" as const, name: "relayer" as const, indexed: true },
+              { type: "uint256" as const, name: "fee" as const, indexed: false },
+            ],
+          };
 
-          const depositCount = logs.length;
-          const anonymitySet = depositCount - withdrawLogs.length;
+          let allDepositLogs: Awaited<ReturnType<typeof publicClient.getLogs>> = [];
+          let allWithdrawLogs: Awaited<ReturnType<typeof publicClient.getLogs>> = [];
+
+          let from = DEPLOY_BLOCK;
+          while (from <= latestBlock) {
+            const to = from + CHUNK > latestBlock ? latestBlock : from + CHUNK;
+            try {
+              const [dLogs, wLogs] = await Promise.all([
+                publicClient.getLogs({ address: poolAddress, event: depositEvent, fromBlock: from, toBlock: to }),
+                publicClient.getLogs({ address: poolAddress, event: withdrawEvent, fromBlock: from, toBlock: to }),
+              ]);
+              allDepositLogs.push(...dLogs);
+              allWithdrawLogs.push(...wLogs);
+            } catch { /* skip */ }
+            from = to + 1n;
+          }
+
+          const depositCount = allDepositLogs.length;
+          const anonymitySet = depositCount - allWithdrawLogs.length;
 
           statEntries.push({
             label: denom.label,

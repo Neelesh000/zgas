@@ -90,9 +90,9 @@ export default function ProofProgress({
                     isError
                       ? "border-red-500 bg-red-500/20"
                       : isDone
-                      ? "border-primary-500 bg-primary-500"
+                      ? "border-primary-500 bg-primary-500 shadow-[0_0_6px_rgba(0,255,163,0.4)]"
                       : isActive
-                      ? "border-primary-500 bg-primary-500/20"
+                      ? "border-primary-500 bg-primary-500/20 shadow-[0_0_8px_rgba(0,255,163,0.3)]"
                       : "border-surface-400 bg-surface-200"
                   }`}
                 >
@@ -173,7 +173,7 @@ export default function ProofProgress({
       {currentStep >= 0 && !isComplete && !error && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-300">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-primary-600 to-primary-400 transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-primary-600 to-[#00d4ff] transition-all duration-500"
             style={{
               width: `${((currentStep + 1) / PROOF_STEPS.length) * 100}%`,
             }}

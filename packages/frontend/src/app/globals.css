@@ -3,14 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --bg-primary: #0a0f0d;
-  --bg-secondary: #111a15;
-  --bg-card: #16211b;
-  --accent: #22c55e;
-  --accent-dim: #166534;
+  --bg-primary: #060a09;
+  --bg-secondary: #0b1210;
+  --bg-card: #101a16;
+  --accent: #00ffa3;
+  --accent-dim: #00663f;
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
-  --border: #1c2a23;
+  --border: #16231d;
 }
 
 @layer base {
@@ -24,7 +24,7 @@
   }
 
   ::selection {
-    @apply bg-primary-500/30 text-white;
+    @apply bg-[#00ffa3]/20 text-white;
   }
 
   /* Custom scrollbar */
@@ -48,14 +48,16 @@
 @layer components {
   .card {
     @apply rounded-xl border border-surface-300 bg-surface-100 p-6 shadow-lg shadow-black/20 backdrop-blur-sm;
+    box-shadow: 0 0 1px rgba(0, 255, 163, 0.15),
+      0 4px 6px -1px rgba(0, 0, 0, 0.2);
   }
 
   .card-hover {
-    @apply card transition-all duration-200 hover:border-primary-700 hover:shadow-primary-900/10;
+    @apply card transition-all duration-200 hover:border-primary-500/50 hover:shadow-neon;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-6 py-3 font-semibold text-white transition-all duration-200 hover:bg-primary-500 hover:shadow-lg hover:shadow-primary-600/25 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary-600 disabled:hover:shadow-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-6 py-3 font-semibold text-white transition-all duration-200 hover:bg-primary-500 hover:shadow-neon-btn disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary-600 disabled:hover:shadow-none;
   }
 
   .btn-secondary {
@@ -68,6 +70,9 @@
 
   .input-field {
     @apply w-full rounded-lg border border-surface-300 bg-surface-200 px-4 py-3 text-slate-200 placeholder-slate-500 outline-none transition-all duration-200 focus:border-primary-600 focus:ring-1 focus:ring-primary-600/50;
+    &:focus {
+      box-shadow: 0 0 8px rgba(0, 255, 163, 0.2);
+    }
   }
 
   .label {
@@ -100,10 +105,11 @@
 
   .note-display {
     @apply break-all rounded-lg border border-primary-800/50 bg-surface-50 p-4 font-mono text-xs text-primary-400;
+    box-shadow: 0 0 6px rgba(0, 255, 163, 0.1);
   }
 
   .gradient-text {
-    @apply bg-gradient-to-r from-primary-400 to-emerald-300 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-[#00ffa3] to-[#00d4ff] bg-clip-text text-transparent;
   }
 
   .glass {
@@ -123,6 +129,6 @@
 
 /* RainbowKit overrides for dark theme */
 [data-rk] {
-  --rk-colors-accentColor: #22c55e !important;
+  --rk-colors-accentColor: #00ffa3 !important;
   --rk-colors-accentColorForeground: #ffffff !important;
 }

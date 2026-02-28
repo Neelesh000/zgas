@@ -12,7 +12,7 @@ export const ACTIVE_CHAIN_ID = BNB_TESTNET_ID;
 
 export const RPC_URLS: Record<number, string> = {
   [BNB_MAINNET_ID]: "https://bsc-dataseed1.binance.org",
-  [BNB_TESTNET_ID]: process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545",
+  [BNB_TESTNET_ID]: process.env.NEXT_PUBLIC_RPC_URL || "https://bnb-testnet.g.alchemy.com/v2/R59igARpZvP3A6PhDdwy-",
 };
 
 /* -------------------------------------------------------------------------- */
@@ -21,9 +21,9 @@ export const RPC_URLS: Record<number, string> = {
 
 export const CONTRACTS = {
   [BNB_TESTNET_ID]: {
-    privacyPool_BNB_01: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6" as Address,
-    privacyPool_BNB_1: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318" as Address,
-    privacyPool_BNB_10: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788" as Address,
+    privacyPool_BNB_01: "0x170e030B879B5d5B2927f57a53F1DbdC92D32BB0" as Address,
+    privacyPool_BNB_1: "0x790Df60e129568AAcB56b2304145DcEf539235de" as Address,
+    privacyPool_BNB_10: "0x303c6c698DFa7Fe6144D7C1Eb89aB3Ce46fB3Ac5" as Address,
     tokenPool_BUSD_100:
       "0x0000000000000000000000000000000000000000" as Address,
     tokenPool_BUSD_1000:
@@ -31,11 +31,11 @@ export const CONTRACTS = {
     tokenPool_BUSD_10000:
       "0x0000000000000000000000000000000000000000" as Address,
     privacyPaymaster:
-      "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82" as Address,
-    aspRegistry: "0x0165878A594ca255338adfa4d48449f69242Eb8F" as Address,
-    entryPoint: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e" as Address,
+      "0xdC7acEE1A3F5F0eccA090a1F8CE7904A39A84d09" as Address,
+    aspRegistry: "0x30A71CC1aC52a461092F3C5feC3B850C7661Abe9" as Address,
+    entryPoint: "0xd1F132B4080841C0f8c5b3aD0a420405a48F4Bf8" as Address,
     simpleAccountFactory:
-      "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0" as Address,
+      "0x803F5D63CB2E26146eE90158D1f4C6f639c9Ea32" as Address,
   },
   [BNB_MAINNET_ID]: {
     privacyPool_BNB_01: "0x0000000000000000000000000000000000000000" as Address,

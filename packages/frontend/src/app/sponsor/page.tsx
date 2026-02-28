@@ -10,7 +10,7 @@ export default function SponsorPage() {
         <h1 className="section-title">Sponsor Gas</h1>
         <p className="section-subtitle">
           Connect a fresh wallet and prove pool membership with a ZK proof. The
-          ERC-4337 Privacy Paymaster sponsors gas for your transaction without
+          ERC-4337 ZGas Paymaster sponsors gas for your transaction without
           linking to your deposit.
         </p>
       </div>

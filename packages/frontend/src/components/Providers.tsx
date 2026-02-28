@@ -12,24 +12,23 @@ import { defineChain } from "viem";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@rainbow-me/rainbowkit/styles.css";
 
-/**
- * Local Anvil devnet — same chain ID as BSC testnet (97) so contract
- * addresses and ABIs stay consistent, but points at localhost RPC.
- */
-const localDevnet = defineChain({
+const bscTestnetCustom = defineChain({
   id: 97,
-  name: "Local Devnet",
-  nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+  name: "BNB Chain Testnet",
+  nativeCurrency: { name: "BNB", symbol: "tBNB", decimals: 18 },
   rpcUrls: {
-    default: { http: ["http://127.0.0.1:8545"] },
+    default: { http: ["https://bnb-testnet.g.alchemy.com/v2/R59igARpZvP3A6PhDdwy-"] },
+  },
+  blockExplorers: {
+    default: { name: "BscScan", url: "https://testnet.bscscan.com" },
   },
   testnet: true,
 });
 
 const config = getDefaultConfig({
-  appName: "Privacy Paymaster",
+  appName: "ZGas",
   projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID || "demo_project_id",
-  chains: [localDevnet, bscTestnet, bsc],
+  chains: [bscTestnetCustom, bscTestnet, bsc],
   ssr: true,
 });
 
@@ -41,13 +40,13 @@ export default function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
           theme={darkTheme({
-            accentColor: "#22c55e",
+            accentColor: "#00ffa3",
             accentColorForeground: "white",
             borderRadius: "medium",
             fontStack: "system",
             overlayBlur: "small",
           })}
-          initialChain={localDevnet}
+          initialChain={bscTestnetCustom}
         >
           {children}
         </RainbowKitProvider>

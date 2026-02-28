@@ -77,7 +77,7 @@ export default function HomePage() {
 
         <div className="relative text-center">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-primary-800/50 bg-primary-900/20 px-4 py-1.5">
-            <div className="h-2 w-2 animate-pulse-slow rounded-full bg-primary-400" />
+            <div className="h-2 w-2 animate-pulse-slow rounded-full bg-primary-400 shadow-[0_0_6px_rgba(0,255,163,0.5)]" />
             <span className="text-sm text-primary-400">
               Live on BNB Chain Testnet
             </span>
@@ -178,7 +178,7 @@ export default function HomePage() {
               className="card-hover group"
             >
               <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-900/50 transition-colors group-hover:bg-primary-900">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-900/50 transition-all group-hover:bg-primary-900 group-hover:shadow-neon">
                   <svg
                     className="h-6 w-6 text-primary-400"
                     fill="none"
@@ -220,22 +220,22 @@ export default function HomePage() {
             {
               label: "Privacy Pool",
               desc: "Merkle tree of commitments with fixed denominations",
-              color: "text-primary-400",
+              color: "text-[#00ffa3]",
             },
             {
               label: "ASP Registry",
               desc: "Compliance screening via Association Set Providers",
-              color: "text-blue-400",
+              color: "text-[#00d4ff]",
             },
             {
               label: "Groth16 Prover",
               desc: "Client-side ZK proof generation in the browser",
-              color: "text-purple-400",
+              color: "text-[#ff00ea]",
             },
             {
               label: "ERC-4337 Paymaster",
               desc: "Gas sponsorship for wallets with valid membership proofs",
-              color: "text-yellow-400",
+              color: "text-[#faff00]",
             },
           ].map((item) => (
             <div

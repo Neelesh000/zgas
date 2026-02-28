@@ -15,7 +15,7 @@ import { ethers } from "ethers";
 /* -------------------------------------------------------------------------- */
 
 const PORT = Number(process.env.PORT) || 4000;
-const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
+const RPC_URL = process.env.RPC_URL || "https://bnb-testnet.g.alchemy.com/v2/R59igARpZvP3A6PhDdwy-";
 
 // Anvil default account #0
 const RELAYER_PRIVATE_KEY =
@@ -43,17 +43,17 @@ const DEPOSIT_EVENT_ABI = [
   "event Deposit(bytes32 indexed commitment, uint32 leafIndex, uint256 timestamp, uint256 denomination)",
 ];
 
-const ASP_REGISTRY_ADDRESS = process.env.ASP_REGISTRY_ADDRESS || "0x0165878A594ca255338adfa4d48449f69242Eb8F";
+const ASP_REGISTRY_ADDRESS = process.env.ASP_REGISTRY_ADDRESS || "0x30A71CC1aC52a461092F3C5feC3B850C7661Abe9";
 
 // Known devnet pool addresses
 const DEVNET_POOL_ADDRESSES = [
-  "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6", // 0.1 BNB
-  "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318", // 1 BNB
-  "0x610178dA211FEF7D417bC0e6FeD39F05609AD788", // 10 BNB
+  "0x170e030B879B5d5B2927f57a53F1DbdC92D32BB0", // 0.1 BNB
+  "0x790Df60e129568AAcB56b2304145DcEf539235de", // 1 BNB
+  "0x303c6c698DFa7Fe6144D7C1Eb89aB3Ce46fB3Ac5", // 10 BNB
 ];
 
 // Set via deploy logs — update after redeployment
-const ENTRY_POINT_ADDRESS = process.env.ENTRY_POINT_ADDRESS || "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e";
+const ENTRY_POINT_ADDRESS = process.env.ENTRY_POINT_ADDRESS || "0xd1F132B4080841C0f8c5b3aD0a420405a48F4Bf8";
 
 /* -------------------------------------------------------------------------- */
 /*                            In-memory state                                 */
@@ -291,15 +291,26 @@ app.post("/api/asp/sync", async (req, res) => {
     // Collect all deposit commitments from all pools
     const allCommitments: { commitment: string; leafIndex: number }[] = [];
 
+    const DEPLOY_BLOCK = 92962584;
+    const CHUNK_SIZE = 9;
+    const latestBlock = await provider.getBlockNumber();
+
     for (const poolAddr of poolAddresses) {
       const pool = new ethers.Contract(poolAddr, DEPOSIT_EVENT_ABI, provider);
-      const logs = await pool.queryFilter(pool.filters.Deposit());
-      for (const log of logs) {
-        const parsed = log as ethers.EventLog;
-        allCommitments.push({
-          commitment: parsed.args[0],
-          leafIndex: allCommitments.length,
-        });
+      let fromBlock = DEPLOY_BLOCK;
+      while (fromBlock <= latestBlock) {
+        const toBlock = Math.min(fromBlock + CHUNK_SIZE, latestBlock);
+        try {
+          const logs = await pool.queryFilter(pool.filters.Deposit(), fromBlock, toBlock);
+          for (const log of logs) {
+            const parsed = log as ethers.EventLog;
+            allCommitments.push({
+              commitment: parsed.args[0],
+              leafIndex: allCommitments.length,
+            });
+          }
+        } catch { /* skip chunk */ }
+        fromBlock = toBlock + 1;
       }
     }
 

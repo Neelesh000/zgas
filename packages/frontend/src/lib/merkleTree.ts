@@ -116,6 +116,40 @@ export class MerkleTree {
   }
 }
 
+/** Block at which our contracts were deployed on BSC testnet */
+const DEPLOY_BLOCK = 92962584n;
+/** Max block range per eth_getLogs call (Alchemy free tier = 10) */
+const LOG_CHUNK_SIZE = 9n;
+
+/**
+ * Fetch logs in small chunks to work within Alchemy free-tier block range limits.
+ */
+async function getLogsChunked(
+  publicClient: PublicClient,
+  params: { address: Address; event: typeof DEPOSIT_EVENT; fromBlock: bigint; toBlock: bigint }
+) {
+  const allLogs: Awaited<ReturnType<PublicClient["getLogs"]>> = [];
+  let from = params.fromBlock;
+  const to = params.toBlock;
+
+  while (from <= to) {
+    const chunkEnd = from + LOG_CHUNK_SIZE > to ? to : from + LOG_CHUNK_SIZE;
+    try {
+      const logs = await publicClient.getLogs({
+        address: params.address,
+        event: params.event,
+        fromBlock: from,
+        toBlock: chunkEnd,
+      });
+      allLogs.push(...logs);
+    } catch {
+      // skip failed chunks
+    }
+    from = chunkEnd + 1n;
+  }
+  return allLogs;
+}
+
 const DEPOSIT_EVENT = {
   type: "event" as const,
   name: "Deposit" as const,
@@ -138,11 +172,12 @@ export async function buildPoolTree(
   const tree = new MerkleTree();
   await tree.init();
 
-  const logs = await publicClient.getLogs({
+  const latestBlock = await publicClient.getBlockNumber();
+  const logs = await getLogsChunked(publicClient, {
     address: poolAddress,
     event: DEPOSIT_EVENT,
-    fromBlock: "earliest",
-    toBlock: "latest",
+    fromBlock: DEPLOY_BLOCK,
+    toBlock: latestBlock,
   });
 
   // Sort by leafIndex to ensure correct insertion order
@@ -179,13 +214,15 @@ export async function buildASPTree(
   const tree = new MerkleTree();
   await tree.init();
 
+  const latestBlock2 = await publicClient.getBlockNumber();
+
   // Collect all deposit commitments from all pools
   for (const poolAddress of poolAddresses) {
-    const logs = await publicClient.getLogs({
+    const logs = await getLogsChunked(publicClient, {
       address: poolAddress,
       event: DEPOSIT_EVENT,
-      fromBlock: "earliest",
-      toBlock: "latest",
+      fromBlock: DEPLOY_BLOCK,
+      toBlock: latestBlock2,
     });
 
     // Sort by leafIndex within each pool
